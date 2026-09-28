@@ -1,0 +1,8 @@
+.gradle/
+.deps/
+build/
+app/build/
+EvolutionLab4-debug.apk
+local.properties
+.idea/
+*.iml

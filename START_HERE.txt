@@ -1,0 +1,24 @@
+EVOLUTION LAB 4 — ANDROID APK, NO ANDROID STUDIO
+
+EASIEST METHOD: GITHUB ACTIONS
+
+1. Create a GitHub repository.
+2. Upload every file/folder in this package.
+3. Open Actions.
+4. Run "Build Evolution Lab APK".
+5. Download the artifact "EvolutionLab4-debug-apk".
+6. Extract it to get EvolutionLab4-debug.apk.
+7. Copy the APK to your Android phone and install it.
+
+NO ANDROID STUDIO IS NEEDED.
+
+LOCAL WINDOWS METHOD:
+Run:
+  powershell -ExecutionPolicy Bypass -File .\build_apk_windows.ps1
+
+LOCAL LINUX/macOS METHOD:
+Run:
+  ./build_apk_linux.sh
+
+IMPORTANT:
+This package contains the source and build automation. It does NOT contain a precompiled APK binary because this environment does not have the Android SDK/NDK build toolchain.

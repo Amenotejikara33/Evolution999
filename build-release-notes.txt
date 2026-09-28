@@ -1,0 +1,11 @@
+Android package: Evolution Lab 4
+Package ID: com.evolutionlab.app
+Min Android API: 21
+Target API: 35
+ABIs: arm64-v8a, armeabi-v7a
+Native C++ standard: C++17
+SDL2: 2.32.10
+SDL2_ttf: 2.24.0
+Build output: EvolutionLab4-debug.apk
+Build mode: Android-Studio-free command line / GitHub Actions
+Source: current V18 mobile-layout-fixed Evolution Lab source
