@@ -1,73 +1,210 @@
 name: Build Evolution Lab APK
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-
-    env:
-      ANDROID_NDK_VERSION: 28.0.13004108
-      ANDROID_PLATFORM: android-35
-      ANDROID_BUILD_TOOLS: 35.0.0
+    name: Build Android APK
+    runs-on: ubuntu-latest
 
     steps:
-
-      - name: Checkout
+      # ------------------------------------------------------------
+      # 1. Get repository
+      # ------------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ------------------------------------------------------------
+      # 2. Java
+      # ------------------------------------------------------------
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Configure Android SDK
+      # ------------------------------------------------------------
+      # 3. Android SDK
+      # ------------------------------------------------------------
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
         shell: bash
         run: |
-          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
-          SDKMANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
-
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-
-          "$SDKMANAGER" \
+          sdkmanager \
             "platform-tools" \
-            "platforms;${ANDROID_PLATFORM}" \
-            "build-tools;${ANDROID_BUILD_TOOLS}" \
-            "ndk;${ANDROID_NDK_VERSION}" \
-            "cmake;3.22.1"
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.2.12479018"
 
-          echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+      # ------------------------------------------------------------
+      # 4. Install Gradle
+      # ------------------------------------------------------------
+      - name: Install Gradle 8.13
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
 
-      # ----------------------------------------------------
-      # Create Android project structure
-      # ----------------------------------------------------
+          curl -L \
+            -o gradle.zip \
+            https://services.gradle.org/distributions/gradle-8.13-bin.zip
 
+          unzip -q gradle.zip
+
+          echo "$RUNNER_TEMP/gradle-8.13/bin" >> "$GITHUB_PATH"
+
+          gradle --version
+
+      # ------------------------------------------------------------
+      # 5. Locate Evolution Lab source
+      # ------------------------------------------------------------
+      - name: Locate Evolution Lab C++ source
+        shell: bash
+        run: |
+          set -e
+
+          SOURCE=""
+
+          CANDIDATES=(
+            "EvolutionLab4_Cxxdroid_SIMULATION_AUDITED_V18_MOBILE_LAYOUT_FIXED.cpp"
+            "EvolutionLab4_Cxxdroid_SIMULATION_AUDITED_V18_FIXED.cpp"
+            "EvolutionLab4_Cxxdroid_SIMULATION_AUDITED_V18.cpp"
+            "EvolutionLab4_Cxxdroid_SIMULATION_AUDITED_V17_UI_FIXED.cpp"
+            "EvolutionLab4_Cxxdroid_SIMULATION_AUDITED_V15.cpp"
+          )
+
+          for FILE in "${CANDIDATES[@]}"; do
+            if [ -f "$FILE" ]; then
+              SOURCE="$FILE"
+              break
+            fi
+          done
+
+          if [ -z "$SOURCE" ]; then
+            SOURCE="$(find . -maxdepth 1 -type f -name '*.cpp' | head -n 1 || true)"
+          fi
+
+          if [ -z "$SOURCE" ]; then
+            echo "ERROR: No Evolution Lab .cpp source file was found."
+            exit 1
+          fi
+
+          echo "Using source:"
+          echo "$SOURCE"
+
+          echo "EVOLUTION_SOURCE=$SOURCE" >> "$GITHUB_ENV"
+
+      # ------------------------------------------------------------
+      # 6. Download SDL2
+      # ------------------------------------------------------------
+      - name: Download SDL2
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p third_party
+
+          git clone \
+            --depth 1 \
+            --branch release-2.30.9 \
+            https://github.com/libsdl-org/SDL.git \
+            third_party/SDL
+
+          echo "SDL2 copied."
+
+      # ------------------------------------------------------------
+      # 7. Download SDL2_ttf
+      # ------------------------------------------------------------
+      - name: Download SDL2_ttf
+        shell: bash
+        run: |
+          set -e
+
+          git clone \
+            --depth 1 \
+            --branch release-2.24.0 \
+            https://github.com/libsdl-org/SDL_ttf.git \
+            third_party/SDL_ttf
+
+          echo "SDL2_ttf copied."
+
+      # ------------------------------------------------------------
+      # 8. Create Android project directories
+      # ------------------------------------------------------------
       - name: Create Android project
         shell: bash
         run: |
-          set -euxo pipefail
+          set -e
 
-          mkdir -p app/src/main/cpp/src
-          mkdir -p app/src/main/java/com/evolutionlab/app
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/java
+          mkdir -p app/src/main/res
+          mkdir -p app/src/main/cpp
           mkdir -p app/src/main/assets
 
-          # Root Gradle build
-          cat > build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.13.2' apply false
-          }
-          EOF
+      # ------------------------------------------------------------
+      # 9. Copy SDL Android Java support
+      # ------------------------------------------------------------
+      - name: Copy SDL Android Java sources
+        shell: bash
+        run: |
+          set -e
 
-          # Gradle settings
+          if [ -d "third_party/SDL/android-project/app/src/main/java/org" ]; then
+            cp -r \
+              third_party/SDL/android-project/app/src/main/java/org \
+              app/src/main/java/
+          else
+            echo "ERROR: SDL Android Java sources were not found."
+            exit 1
+          fi
+
+      # ------------------------------------------------------------
+      # 10. Copy SDL Android resources
+      # ------------------------------------------------------------
+      - name: Copy SDL Android resources
+        shell: bash
+        run: |
+          set -e
+
+          if [ -d "third_party/SDL/android-project/app/src/main/res" ]; then
+            cp -r \
+              third_party/SDL/android-project/app/src/main/res/. \
+              app/src/main/res/
+          else
+            echo "ERROR: SDL Android resources were not found."
+            exit 1
+          fi
+
+      # ------------------------------------------------------------
+      # 11. Copy Evolution Lab source
+      # ------------------------------------------------------------
+      - name: Install Evolution Lab source
+        shell: bash
+        run: |
+          set -e
+
+          cp "$EVOLUTION_SOURCE" app/src/main/cpp/main.cpp
+
+          echo "Installed:"
+          ls -lh app/src/main/cpp/main.cpp
+
+      # ------------------------------------------------------------
+      # 12. Root Gradle settings
+      # ------------------------------------------------------------
+      - name: Create settings.gradle
+        shell: bash
+        run: |
           cat > settings.gradle <<'EOF'
           pluginManagement {
               repositories {
@@ -79,106 +216,391 @@ jobs:
 
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+
               repositories {
                   google()
                   mavenCentral()
               }
           }
 
-          rootProject.name = 'EvolutionLab4'
-          include ':app'
+          rootProject.name = "EvolutionLab4"
+          include(":app")
           EOF
 
-          # App Gradle file
+      # ------------------------------------------------------------
+      # 13. Root build.gradle
+      # ------------------------------------------------------------
+      - name: Create root build.gradle
+        shell: bash
+        run: |
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.13.2' apply false
+          }
+          EOF
+
+      # ------------------------------------------------------------
+      # 14. Android app build.gradle
+      # ------------------------------------------------------------
+      - name: Create app/build.gradle
+        shell: bash
+        run: |
           cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
           }
 
           android {
-              namespace 'com.evolutionlab.app'
+              namespace 'com.evolutionlab'
               compileSdk 35
 
+              ndkVersion "27.2.12479018"
+
               defaultConfig {
-                  applicationId 'com.evolutionlab.app'
-                  minSdk 21
+                  applicationId "com.evolutionlab"
+                  minSdk 24
                   targetSdk 35
+
                   versionCode 1
-                  versionName '1.0.0'
+                  versionName "1.0"
 
                   externalNativeBuild {
                       cmake {
-                          cppFlags '-std=c++17', '-O2', '-ffast-math'
-                          arguments '-DANDROID_STL=c++_shared'
+                          cppFlags "-std=c++17"
+                          arguments "-DANDROID_STL=c++_shared"
                       }
                   }
 
                   ndk {
-                      abiFilters 'arm64-v8a', 'armeabi-v7a'
+                      abiFilters "arm64-v8a", "armeabi-v7a"
                   }
               }
 
               buildTypes {
                   debug {
+                      minifyEnabled false
                       debuggable true
-                      jniDebuggable true
                   }
 
                   release {
                       minifyEnabled false
                       shrinkResources false
+                      debuggable false
+                  }
+              }
+
+              packaging {
+                  jniLibs {
+                      useLegacyPackaging = true
                   }
               }
 
               externalNativeBuild {
                   cmake {
-                      path file('src/main/cpp/CMakeLists.txt')
+                      path file("src/main/cpp/CMakeLists.txt")
+                      version "3.22.1"
                   }
               }
-
-              sourceSets {
-                  main {
-                      assets.srcDirs = ['src/main/assets']
-                  }
-              }
-
-              packagingOptions {
-                  jniLibs {
-                      useLegacyPackaging true
-                  }
-
-                  resources {
-                      excludes += [
-                          '/META-INF/LICENSE*',
-                          '/META-INF/NOTICE*'
-                      ]
-                  }
-              }
-          }
-
-          dependencies {
           }
           EOF
 
-          # Manifest
+      # ------------------------------------------------------------
+      # 15. Android manifest
+      # ------------------------------------------------------------
+      - name: Create AndroidManifest.xml
+        shell: bash
+        run: |
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
               <uses-feature
-                  android:glEsVersion="0x00020000"
-                  android:required="true" />
+                  android:name="android.hardware.touchscreen"
+                  android:required="false" />
 
               <application
-                  android:allowBackup="false"
+                  android:allowBackup="true"
                   android:label="Evolution Lab 4"
                   android:theme="@style/SDLActivityTheme"
-                  android:supportsRtl="true"
-                  android:usesCleartextTraffic="false">
+                  android:usesCleartextTraffic="true">
 
                   <activity
-                      android:name="com.evolutionlab.app.EvolutionLabActivity"
-                      android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+                      android:name=".EvolutionLabActivity"
+                      android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|keyboard|navigation|screenLayout|uiMode"
                       android:exported="true"
                       android:launchMode="singleTask"
-                      android
+                      android:screenOrientation="fullSensor">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+
+              </application>
+
+          </manifest>
+          EOF
+
+      # ------------------------------------------------------------
+      # 16. Evolution Lab Activity
+      # ------------------------------------------------------------
+      - name: Create EvolutionLabActivity.java
+        shell: bash
+        run: |
+          cat > app/src/main/java/com/evolutionlab/EvolutionLabActivity.java <<'EOF'
+          package com.evolutionlab;
+
+          import org.libsdl.app.SDLActivity;
+
+          public class EvolutionLabActivity extends SDLActivity {
+          }
+          EOF
+
+      # ------------------------------------------------------------
+      # 17. CMake
+      # ------------------------------------------------------------
+      - name: Create CMakeLists.txt
+        shell: bash
+        run: |
+          cat > app/src/main/cpp/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.22)
+
+          project(EvolutionLab4 LANGUAGES C CXX)
+
+          set(CMAKE_C_STANDARD 99)
+          set(CMAKE_CXX_STANDARD 17)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+          # ----------------------------------------------------------
+          # SDL2 configuration
+          # ----------------------------------------------------------
+
+          set(SDL_SHARED ON CACHE BOOL "" FORCE)
+          set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+          set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+          set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+          set(SDL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+
+          # ----------------------------------------------------------
+          # SDL2_ttf configuration
+          # ----------------------------------------------------------
+
+          set(SDL2TTF_VENDORED ON CACHE BOOL "" FORCE)
+          set(SDL2TTF_SAMPLES OFF CACHE BOOL "" FORCE)
+          set(SDL2TTF_INSTALL OFF CACHE BOOL "" FORCE)
+          set(SDL2TTF_HARFBUZZ OFF CACHE BOOL "" FORCE)
+          set(SDL2TTF_PLUTOSVG OFF CACHE BOOL "" FORCE)
+
+          # ----------------------------------------------------------
+          # Add SDL2
+          # ----------------------------------------------------------
+
+          add_subdirectory(
+              ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/SDL
+              ${CMAKE_BINARY_DIR}/SDL2
+              EXCLUDE_FROM_ALL
+          )
+
+          # ----------------------------------------------------------
+          # Add SDL2_ttf
+          # ----------------------------------------------------------
+
+          add_subdirectory(
+              ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/SDL_ttf
+              ${CMAKE_BINARY_DIR}/SDL2_ttf
+              EXCLUDE_FROM_ALL
+          )
+
+          # ----------------------------------------------------------
+          # Main Evolution Lab library
+          #
+          # SDL Android requires the application entry target to be
+          # built as a shared library named "main".
+          # ----------------------------------------------------------
+
+          add_library(
+              main
+              SHARED
+              main.cpp
+          )
+
+          target_compile_features(
+              main
+              PRIVATE
+              cxx_std_17
+          )
+
+          target_include_directories(
+              main
+              PRIVATE
+              ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/SDL/include
+              ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/SDL_ttf/include
+          )
+
+          # ----------------------------------------------------------
+          # Find Android system libraries
+          # ----------------------------------------------------------
+
+          find_library(
+              ANDROID_LIB
+              android
+          )
+
+          find_library(
+              LOG_LIB
+              log
+          )
+
+          find_library(
+              GLES2_LIB
+              GLESv2
+          )
+
+          # ----------------------------------------------------------
+          # SDL2 target
+          # ----------------------------------------------------------
+
+          if(TARGET SDL2::SDL2)
+              set(EVOLUTION_SDL_TARGET SDL2::SDL2)
+          elseif(TARGET SDL2)
+              set(EVOLUTION_SDL_TARGET SDL2)
+          else()
+              message(FATAL_ERROR "SDL2 target was not created.")
+          endif()
+
+          # ----------------------------------------------------------
+          # SDL2_ttf target
+          # ----------------------------------------------------------
+
+          if(TARGET SDL2_ttf::SDL2_ttf)
+              set(EVOLUTION_TTF_TARGET SDL2_ttf::SDL2_ttf)
+          elseif(TARGET SDL2_ttf)
+              set(EVOLUTION_TTF_TARGET SDL2_ttf)
+          elseif(TARGET SDL2_ttf-static)
+              set(EVOLUTION_TTF_TARGET SDL2_ttf-static)
+          else()
+              message(FATAL_ERROR "SDL2_ttf target was not created.")
+          endif()
+
+          # ----------------------------------------------------------
+          # Final link
+          # ----------------------------------------------------------
+
+          target_link_libraries(
+              main
+              PRIVATE
+              ${EVOLUTION_SDL_TARGET}
+              ${EVOLUTION_TTF_TARGET}
+              ${ANDROID_LIB}
+              ${LOG_LIB}
+              ${GLES2_LIB}
+          )
+
+          # ----------------------------------------------------------
+          # Android-specific definitions
+          # ----------------------------------------------------------
+
+          target_compile_definitions(
+              main
+              PRIVATE
+              __ANDROID__
+          )
+
+          # ----------------------------------------------------------
+          # Helpful warnings, but do not turn warnings into errors.
+          # ----------------------------------------------------------
+
+          if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+              target_compile_options(
+                  main
+                  PRIVATE
+                  -Wno-unused-parameter
+                  -Wno-unused-variable
+                  -Wno-sign-compare
+              )
+          endif()
+          EOF
+
+      # ------------------------------------------------------------
+      # 18. Verify project files
+      # ------------------------------------------------------------
+      - name: Verify project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Checking files..."
+
+          test -f build.gradle
+          test -f settings.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/evolutionlab/EvolutionLabActivity.java
+          test -f app/src/main/cpp/CMakeLists.txt
+          test -f app/src/main/cpp/main.cpp
+
+          echo
+          echo "Project structure:"
+          find app/src/main -maxdepth 4 -type f | sort
+
+      # ------------------------------------------------------------
+      # 19. Build APK
+      # ------------------------------------------------------------
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -e
+
+          gradle \
+            clean \
+            assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      # ------------------------------------------------------------
+      # 20. Find APK
+      # ------------------------------------------------------------
+      - name: Locate generated APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching for APK..."
+
+          find app/build/outputs -type f -name "*.apk" -print
+
+          APK="$(find app/build/outputs/apk/debug -type f -name "*.apk" | head -n 1 || true)"
+
+          if [ -z "$APK" ]; then
+              echo
+              echo "ERROR: APK was not generated."
+              echo
+              echo "Available build files:"
+              find app/build/outputs -type f -print || true
+              exit 1
+          fi
+
+          echo
+          echo "APK found:"
+          echo "$APK"
+
+          mkdir -p dist
+
+          cp "$APK" dist/EvolutionLab4-debug.apk
+
+          echo
+          echo "Final APK:"
+          ls -lh dist/EvolutionLab4-debug.apk
+
+      # ------------------------------------------------------------
+      # 21. Upload APK artifact
+      # ------------------------------------------------------------
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EvolutionLab4-debug-apk
+          path: dist/EvolutionLab4-debug.apk
+          if-no-files-found: error
+          retention-days: 30
