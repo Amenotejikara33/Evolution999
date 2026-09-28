@@ -45,20 +45,51 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Create Android project directories
+      # ----------------------------------------------------
+      # Create Android project structure
+      # ----------------------------------------------------
+
+      - name: Create Android project
         shell: bash
         run: |
           set -euxo pipefail
 
-          mkdir -p app
-          mkdir -p app/src/main
-          mkdir -p app/src/main/cpp
-          mkdir -p app/src/main/java
-          mkdir -p app/src/main/res
+          mkdir -p app/src/main/cpp/src
+          mkdir -p app/src/main/java/com/evolutionlab/app
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/assets
 
-      - name: Create app build.gradle
-        shell: bash
-        run: |
+          # Root Gradle build
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.13.2' apply false
+          }
+          EOF
+
+          # Gradle settings
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = 'EvolutionLab4'
+          include ':app'
+          EOF
+
+          # App Gradle file
           cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
@@ -96,7 +127,6 @@ jobs:
                   release {
                       minifyEnabled false
                       shrinkResources false
-                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
                   }
               }
 
@@ -130,65 +160,25 @@ jobs:
           }
           EOF
 
-      - name: Create proguard file
-        shell: bash
-        run: |
-          touch app/proguard-rules.pro
+          # Manifest
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-      - name: Verify project files
-        shell: bash
-        run: |
-          set -euxo pipefail
+              <uses-feature
+                  android:glEsVersion="0x00020000"
+                  android:required="true" />
 
-          echo "Checking files..."
+              <application
+                  android:allowBackup="false"
+                  android:label="Evolution Lab 4"
+                  android:theme="@style/SDLActivityTheme"
+                  android:supportsRtl="true"
+                  android:usesCleartextTraffic="false">
 
-          test -f build.gradle
-          test -f settings.gradle
-          test -f app/build.gradle
-          test -f app/src/main/AndroidManifest.xml
-          test -f app/src/main/cpp/CMakeLists.txt
-          test -f app/src/main/cpp/src/EvolutionLab4.cpp
-
-          echo "All required project files exist."
-
-      - name: Build Evolution Lab
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          chmod +x ./prepare_android_project.sh
-
-          ./prepare_android_project.sh
-
-      - name: Find APK
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          echo "Searching for APK..."
-
-          find . -type f -name "*.apk" -print
-
-      - name: Copy APK
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          APK=$(find . -type f -name "app-debug.apk" | head -n 1)
-
-          if [ -z "$APK" ]; then
-              echo "ERROR: APK was not created."
-              exit 1
-          fi
-
-          cp "$APK" EvolutionLab4-debug.apk
-
-          ls -lh EvolutionLab4-debug.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: EvolutionLab4-debug-apk
-          path: EvolutionLab4-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+                  <activity
+                      android:name="com.evolutionlab.app.EvolutionLabActivity"
+                      android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android
