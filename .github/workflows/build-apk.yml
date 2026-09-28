@@ -43,22 +43,113 @@ jobs:
             "cmake;3.22.1"
 
           echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
-
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Prepare Android directories
+      - name: Create Android project directories
         shell: bash
         run: |
           set -euxo pipefail
 
-          mkdir -p ./app
-          mkdir -p ./app/src
-          mkdir -p ./app/src/main
-          mkdir -p ./app/src/main/cpp
-          mkdir -p ./app/src/main/java
+          mkdir -p app
+          mkdir -p app/src/main
+          mkdir -p app/src/main/cpp
+          mkdir -p app/src/main/java
+          mkdir -p app/src/main/res
 
-          echo "Android directories created:"
-          find ./app -maxdepth 5 -type d | sort
+      - name: Create app build.gradle
+        shell: bash
+        run: |
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.evolutionlab.app'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.evolutionlab.app'
+                  minSdk 21
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0.0'
+
+                  externalNativeBuild {
+                      cmake {
+                          cppFlags '-std=c++17', '-O2', '-ffast-math'
+                          arguments '-DANDROID_STL=c++_shared'
+                      }
+                  }
+
+                  ndk {
+                      abiFilters 'arm64-v8a', 'armeabi-v7a'
+                  }
+              }
+
+              buildTypes {
+                  debug {
+                      debuggable true
+                      jniDebuggable true
+                  }
+
+                  release {
+                      minifyEnabled false
+                      shrinkResources false
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                  }
+              }
+
+              externalNativeBuild {
+                  cmake {
+                      path file('src/main/cpp/CMakeLists.txt')
+                  }
+              }
+
+              sourceSets {
+                  main {
+                      assets.srcDirs = ['src/main/assets']
+                  }
+              }
+
+              packagingOptions {
+                  jniLibs {
+                      useLegacyPackaging true
+                  }
+
+                  resources {
+                      excludes += [
+                          '/META-INF/LICENSE*',
+                          '/META-INF/NOTICE*'
+                      ]
+                  }
+              }
+          }
+
+          dependencies {
+          }
+          EOF
+
+      - name: Create proguard file
+        shell: bash
+        run: |
+          touch app/proguard-rules.pro
+
+      - name: Verify project files
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "Checking files..."
+
+          test -f build.gradle
+          test -f settings.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/cpp/CMakeLists.txt
+          test -f app/src/main/cpp/src/EvolutionLab4.cpp
+
+          echo "All required project files exist."
 
       - name: Build Evolution Lab
         shell: bash
@@ -86,8 +177,8 @@ jobs:
           APK=$(find . -type f -name "app-debug.apk" | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not created."
-            exit 1
+              echo "ERROR: APK was not created."
+              exit 1
           fi
 
           cp "$APK" EvolutionLab4-debug.apk
